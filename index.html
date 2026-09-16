@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f2a44">
+<title>Mileage log</title>
+<style>
+:root {
+  --paper: #eef1f4; --sheet: #fff; --band: #1f2a44; --band-text: #fff;
+  --ink: #1d2433; --pen: #2b4c9b; --rule: #c5ccd6; --muted: #5d6778;
+  --warn: #9a5b0b; --warn-bg: #fdf3e2; --danger: #a33a2c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161e; --sheet: #1a202b; --band: #2c3a5c; --band-text: #f1f4f9;
+    --ink: #e4e8ef; --pen: #8fb0ff; --rule: #343d4d; --muted: #9aa4b5;
+    --warn: #f0b35a; --warn-bg: #2d2415; --danger: #ff8a7a;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161e; --sheet: #1a202b; --band: #2c3a5c; --band-text: #f1f4f9;
+  --ink: #e4e8ef; --pen: #8fb0ff; --rule: #343d4d; --muted: #9aa4b5;
+  --warn: #f0b35a; --warn-bg: #2d2415; --danger: #ff8a7a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Barlow", "Segoe UI", Roboto, system-ui, sans-serif; line-height: 1.4; }
+main { max-width: 900px; margin: 0 auto; padding: 14px 14px 40px; }
+h1 { font-family: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif; font-size: 1.8rem; margin: 0 0 12px; }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--pen); outline-offset: 2px; }
+.form { background: var(--sheet); border: 1px solid var(--rule); border-top: 6px solid var(--band); border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.form label { display: grid; gap: 2px; font-size: .85rem; color: var(--muted); }
+.form input { border: 1px solid var(--rule); border-radius: 4px; padding: 9px 10px; background: var(--paper); color: var(--pen); font-size: 1.05rem; width: 100%; }
+.form .odo { font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+.wide { grid-column: 1 / -1; }
+.calc { color: var(--muted); }
+.calc b { color: var(--ink); }
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.primary { background: var(--pen); color: #fff; border: 0; border-radius: 4px; padding: 11px 20px; font-weight: 600; }
+.plain { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 14px; }
+.danger { color: var(--danger); }
+.msg { min-height: 1.3em; margin: 8px 0 0; color: var(--muted); }
+.msg.err { color: var(--danger); }
+.warns { margin-top: 12px; padding: 10px 14px; background: var(--warn-bg); color: var(--warn); border-radius: 6px; }
+.warns[hidden] { display: none; }
+.warns ul { margin: 0; padding-left: 18px; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 20px 0 8px; }
+.bar label { display: grid; gap: 2px; font-size: .8rem; color: var(--muted); }
+.bar input { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--sheet); }
+.bar span { flex: 1; }
+.wrap { overflow-x: auto; background: var(--sheet); border: 1px solid var(--band); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-variant-numeric: tabular-nums; }
+th { background: var(--band); color: var(--band-text); text-align: left; padding: 7px 8px; font-size: .85rem; line-height: 1.15; }
+td { border-top: 1px solid var(--rule); padding: 8px; color: var(--pen); }
+td:first-child { color: var(--ink); font-weight: 600; }
+tr.row { cursor: pointer; }
+tr.row:hover td, tr.sel td { background: var(--paper); }
+td.miss { color: var(--warn); }
+tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink); }
+.empty { color: var(--muted); padding: 20px; }
+.hint { font-size: .85rem; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mileage log</h1>
+
+  <div class="form">
+    <label>Date<input type="date" id="date"></label>
+    <label>Print initial<input id="initial" autocomplete="off"></label>
+    <label>Odometer begin<input class="odo" id="begin" inputmode="numeric" autocomplete="off"></label>
+    <label>Odometer end<input class="odo" id="end" inputmode="numeric" autocomplete="off"></label>
+    <div class="wide calc" id="calc">Total: <b>–</b></div>
+    <label>Job# / Phase#<input id="phase" autocomplete="off"></label>
+    <label>Destination<input id="project" autocomplete="off"></label>
+    <label>Purpose<input id="purpose" autocomplete="off"></label>
+    <label>Personal mileage<input id="personal" inputmode="numeric" autocomplete="off"></label>
+    <div class="wide btns">
+      <button class="primary" id="save" type="button">Save</button>
+      <button class="plain" id="clear" type="button">New entry</button>
+      <button class="plain danger" id="del" type="button" hidden>Delete this day</button>
+    </div>
+  </div>
+  <p class="msg" id="msg" role="status"></p>
+  <div class="warns" id="warns" hidden><ul id="warnlist"></ul></div>
+
+  <div class="bar">
+    <label>From<input type="date" id="from"></label>
+    <label>To<input type="date" id="to"></label>
+    <span></span>
+    <button class="plain" id="export" type="button">Export CSV</button>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Print initial</th><th>Job# / Phase#</th><th>Destination</th><th>Purpose</th><th>Odometer begin</th><th>Odometer end</th><th>Total</th><th>Personal mileage</th></tr></thead>
+      <tbody id="tbody"></tbody>
+      <tfoot><tr><td colspan="7" style="text-align:right">Total miles</td><td id="sum">0</td><td></td></tr></tfoot>
+    </table>
+  </div>
+  <p class="hint">Tap a row to edit it. Entries are saved on this phone in this browser only. Export regularly as a backup.</p>
+</main>
+
+<script>
+(function () {
+  const KEY = "mileage-log-v1";
+  const FIELDS = ["initial", "phase", "project", "purpose", "begin", "end", "personal"];
+  const $ = (id) => document.getElementById(id);
+  let rows = {};
+
+  function load() {
+    try { rows = JSON.parse(localStorage.getItem(KEY) || "null") || null; } catch (e) { rows = null; }
+    if (!rows) rows = { "2026-09-16": { initial: "RDV", phase: "", project: "", purpose: "", begin: 154319, end: null, personal: "" } };
+  }
+  function persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(rows)); return true; }
+    catch (e) { msg("Couldn't save on this device. Export now so nothing is lost.", true); return false; }
+  }
+  function today() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function short(iso) { const [, m, d] = iso.split("-"); return +m + "/" + +d; }
+  function long(iso) { const [y, m, d] = iso.split("-"); return +m + "/" + +d + "/" + y; }
+  function num(v) { const s = String(v ?? "").replace(/[^0-9]/g, ""); return s ? Number(s) : null; }
+  function fmt(n) { return n == null ? "" : n.toLocaleString("en-US"); }
+  function total(r) { return r.begin != null && r.end != null && r.end >= r.begin ? r.end - r.begin : null; }
+  function dates() { return Object.keys(rows).sort(); }
+  function msg(t, err) { $("msg").textContent = t || ""; $("msg").className = "msg" + (err ? " err" : ""); }
+  function inRange(d) { const f = $("from").value, t = $("to").value; return (!f || d >= f) && (!t || d <= t); }
+
+  function lastBefore(date) {
+    const prev = dates().filter((d) => d < date);
+    return prev.length ? rows[prev[prev.length - 1]] : null;
+  }
+
+  function fillForm(date) {
+    $("date").value = date;
+    const r = rows[date];
+    if (r) {
+      FIELDS.forEach((f) => ($(f).value = r[f] ?? ""));
+      $("del").hidden = false;
+    } else {
+      const p = lastBefore(date);
+      $("initial").value = p && p.initial ? p.initial : "RDV";
+      $("phase").value = p ? p.phase || "" : "";
+      $("project").value = p ? p.project || "" : "";
+      $("purpose").value = p ? p.purpose || "" : "";
+      $("begin").value = p && p.end != null ? p.end : "";
+      $("end").value = "";
+      $("personal").value = "";
+      $("del").hidden = true;
+    }
+    updateCalc();
+    render();
+  }
+
+  function updateCalc() {
+    const b = num($("begin").value), e = num($("end").value);
+    const el = $("calc");
+    if (b != null && e != null) {
+      el.innerHTML = e >= b ? "Total: <b></b>" : "Total: <b></b> (end is lower than begin)";
+      el.querySelector("b").textContent = e >= b ? fmt(e - b) + " miles" : "–";
+    } else el.innerHTML = "Total: <b>–</b>";
+  }
+  ["begin", "end"].forEach((id) => $(id).addEventListener("input", updateCalc));
+  $("date").addEventListener("change", () => { if ($("date").value) fillForm($("date").value); });
+
+  $("save").addEventListener("click", () => {
+    const d = $("date").value;
+    if (!d) return msg("Pick a date.", true);
+    const r = {};
+    FIELDS.forEach((f) => (r[f] = f === "begin" || f === "end" ? num($(f).value) : $(f).value.trim()));
+    if (r.begin == null && r.end == null) return msg("Enter at least one odometer reading.", true);
+    if (r.begin != null && r.end != null && r.end < r.begin) return msg("End reading is lower than begin. Check the numbers.", true);
+    rows[d] = r;
+    if (persist()) msg("Saved " + short(d) + (total(r) != null ? ": " + fmt(total(r)) + " miles." : "."));
+    $("del").hidden = false;
+    render();
+  });
+
+  $("clear").addEventListener("click", () => { fillForm(today()); msg(""); });
+
+  $("del").addEventListener("click", () => {
+    const d = $("date").value;
+    if (!rows[d] || !confirm("Delete the entry for " + short(d) + "?")) return;
+    delete rows[d];
+    if (persist()) msg("Deleted " + short(d) + ".");
+    fillForm(d);
+  });
+
+  function render() {
+    const list = dates().filter(inRange);
+    const tb = $("tbody");
+    tb.textContent = "";
+    let sum = 0;
+    if (!list.length) {
+      const tr = tb.insertRow(); const td = tr.insertCell();
+      td.colSpan = 9; td.className = "empty"; td.textContent = "No entries in this range.";
+    }
+    list.slice().reverse().forEach((d) => {
+      const r = rows[d], t = total(r);
+      if (t != null) sum += t;
+      const tr = tb.insertRow();
+      tr.className = "row" + (d === $("date").value ? " sel" : "");
+      const vals = [short(d), r.initial, r.phase, r.project, r.purpose, fmt(r.begin), fmt(r.end), fmt(t), r.personal];
+      vals.forEach((v, i) => {
+        const td = tr.insertCell();
+        td.textContent = v || "";
+        if ((i === 5 && r.begin == null) || (i === 6 && r.end == null && d !== today())) { td.className = "miss"; td.textContent = "missing"; }
+      });
+      tr.addEventListener("click", () => { fillForm(d); msg(""); window.scrollTo({ top: 0, behavior: "smooth" }); });
+    });
+    $("sum").textContent = fmt(sum);
+
+    const warns = [];
+    list.forEach((d, i) => {
+      const r = rows[d], p = i > 0 ? rows[list[i - 1]] : null;
+      if (p && p.end != null && r.begin != null && p.end !== r.begin) {
+        const g = r.begin - p.end;
+        warns.push(short(d) + " begins at " + fmt(r.begin) + " but " + short(list[i - 1]) + " ended at " + fmt(p.end) + (g > 0 ? " (" + g + " miles unlogged)." : " (off by " + -g + ")."));
+      }
+      if (d < today() && (r.begin == null || r.end == null)) warns.push(short(d) + " is missing a reading.");
+    });
+    const ul = $("warnlist"); ul.textContent = "";
+    warns.forEach((w) => { const li = document.createElement("li"); li.textContent = w; ul.appendChild(li); });
+    $("warns").hidden = !warns.length;
+  }
+  $("from").addEventListener("change", render);
+  $("to").addEventListener("change", render);
+
+  function cell(v) { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  $("export").addEventListener("click", () => {
+    const list = dates().filter(inRange);
+    if (!list.length) return msg("No entries to export.", true);
+    const out = ["Date,Print Initial,Job#/Phase#,Destination,Purpose,Odometer Begin,Odometer End,Total,Personal Mileage"];
+    let sum = 0;
+    list.forEach((d) => {
+      const r = rows[d], t = total(r);
+      if (t != null) sum += t;
+      out.push([long(d), r.initial, r.phase, r.project, r.purpose, r.begin, r.end, t, r.personal].map(cell).join(","));
+    });
+    out.push(",,,,,,Total Miles," + sum + ",");
+    const blob = new Blob([out.join("\r\n") + "\r\n"], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "mileage-log_" + list[0] + "_to_" + list[list.length - 1] + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    msg("Exported " + list.length + " entries.");
+  });
+
+  load();
+  persist();
+  fillForm(today());
+})();
+</script>
+</body>
+</html>
