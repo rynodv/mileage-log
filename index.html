@@ -110,7 +110,7 @@ tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink
 
   function load() {
     try { rows = JSON.parse(localStorage.getItem(KEY) || "null") || null; } catch (e) { rows = null; }
-    if (!rows) rows = { "2026-09-16": { initial: "RDV", phase: "", project: "", purpose: "", begin: 154319, end: null, personal: "" } };
+    if (!rows) rows = {};
   }
   function persist() {
     try { localStorage.setItem(KEY, JSON.stringify(rows)); return true; }
@@ -139,7 +139,7 @@ tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink
       $("del").hidden = false;
     } else {
       const p = lastBefore(date);
-      $("initial").value = p && p.initial ? p.initial : "RDV";
+      $("initial").value = p && p.initial ? p.initial : "";
       $("phase").value = p ? p.phase || "" : "";
       $("project").value = p ? p.project || "" : "";
       $("purpose").value = p ? p.purpose || "" : "";
@@ -193,7 +193,7 @@ tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink
     let sum = 0;
     if (!list.length) {
       const tr = tb.insertRow(); const td = tr.insertCell();
-      td.colSpan = 9; td.className = "empty"; td.textContent = "No entries in this range.";
+      td.colSpan = 9; td.className = "empty"; td.textContent = dates().length ? "No entries in this range." : "No entries yet. Fill in the form above and tap Save.";
     }
     list.slice().reverse().forEach((d) => {
       const r = rows[d], t = total(r);
