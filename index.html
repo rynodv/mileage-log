@@ -49,6 +49,8 @@ button, input { font: inherit; color: inherit; }
 .bar label { display: grid; gap: 2px; font-size: .8rem; color: var(--muted); }
 .bar input { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--sheet); }
 .bar span { flex: 1; }
+.bar.monthly { margin-top: 0; padding-top: 10px; border-top: 1px solid var(--rule); }
+.bar.monthly input:not([type]), .bar.monthly input[type="email"] { width: 11em; }
 .wrap { overflow-x: auto; background: var(--sheet); border: 1px solid var(--band); }
 table { border-collapse: collapse; width: 100%; min-width: 760px; font-variant-numeric: tabular-nums; }
 th { background: var(--band); color: var(--band-text); text-align: left; padding: 7px 8px; font-size: .85rem; line-height: 1.15; }
@@ -90,6 +92,15 @@ tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink
     <label>To<input type="date" id="to"></label>
     <span></span>
     <button class="plain" id="export" type="button">Export CSV</button>
+  </div>
+  <div class="bar monthly">
+    <label>Form month<input type="month" id="pdfmonth"></label>
+    <label>Your name<input id="pname" autocomplete="name"></label>
+    <label>Email<input id="pemail" type="email" autocomplete="email"></label>
+    <span></span>
+    <button class="plain" id="pickform" type="button">Load blank form</button>
+    <button class="primary" id="pdf" type="button">Download filled form</button>
+    <input type="file" id="formfile" accept="application/pdf,.pdf" hidden>
   </div>
   <div class="wrap">
     <table>
@@ -247,8 +258,200 @@ tfoot td { border-top: 2px solid var(--band); font-weight: 600; color: var(--ink
     msg("Exported " + list.length + " entries.");
   });
 
+  // ---------- Monthly FORM-05 PDF ----------
+  const SKEY = "mileage-log-settings";
+  const PDFLIB_URL = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+  // The blank form is never on the website: it's loaded from this device once and kept in this browser.
+  const FKEY = "mileage-log-form";
+
+  function toB64(buf) {
+    const u = new Uint8Array(buf); let s = "";
+    for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function fromB64(b64) {
+    const s = atob(b64), u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    return u;
+  }
+  let formBytes = null;
+  function loadStoredForm() {
+    try { const b = localStorage.getItem(FKEY); formBytes = b ? fromB64(b) : null; } catch (e) { formBytes = null; }
+    $("pickform").textContent = formBytes ? "Change blank form" : "Load blank form";
+  }
+
+  function loadSettings() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SKEY) || "{}") || {}; } catch (e) { s = {}; }
+    $("pname").value = s.name || "";
+    $("pemail").value = s.email || "";
+  }
+  function saveSettings() {
+    try { localStorage.setItem(SKEY, JSON.stringify({ name: $("pname").value.trim(), email: $("pemail").value.trim() })); } catch (e) {}
+  }
+  ["pname", "pemail"].forEach((id) => $(id).addEventListener("change", saveSettings));
+
+  // Default month: last month during the first half of a month, otherwise this month
+  (function () {
+    const d = new Date();
+    if (d.getDate() <= 15) d.setMonth(d.getMonth() - 1, 1);
+    $("pdfmonth").value = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  })();
+
+  let pdfLibPromise = null;
+  function loadPdfLib() {
+    if (window.PDFLib) return Promise.resolve(window.PDFLib);
+    if (!pdfLibPromise) {
+      pdfLibPromise = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = PDFLIB_URL;
+        s.onload = () => (window.PDFLib ? resolve(window.PDFLib) : reject(new Error("pdf-lib didn't load")));
+        s.onerror = () => { pdfLibPromise = null; reject(new Error("Couldn't load pdf-lib (are you online?)")); };
+        document.head.appendChild(s);
+      });
+    }
+    return pdfLibPromise;
+  }
+
+  async function buildMileagePdf(PDFLib, templateBytes, entries, header) {
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const PER_PAGE = 25;
+    // Layout of the FORM-05 template, in PDF points
+    const ROW1_BOTTOM = 471.96, ROW_PITCH = (471.96 - 126.36) / 24, ROW_H = 13.08;
+    const TOTAL_X0 = 499.2, TOTAL_X1 = 539.6, TOTAL_MILES_Y = 116.5;
+    const COLS = [
+      ["DATERow", "date"], ["PRINT INITIALRow", "initial"], ["JOB PHASERow", "phase"],
+      ["DESTINATIONRow", "project"], ["PURPOSERow", "purpose"],
+      ["ODOMETER BEGINRow", "begin"], ["ODOMETER ENDRow", "end"], ["PERSONAL MILEAGERow", "personal"],
+    ];
+    const chunks = [];
+    for (let i = 0; i < entries.length; i += PER_PAGE) chunks.push(entries.slice(i, i + PER_PAGE));
+    if (!chunks.length) chunks.push([]);
+    const multi = chunks.length > 1;
+    const out = multi ? await PDFDocument.create() : null;
+    let single = null;
+
+    for (const chunk of chunks) {
+      const doc = await PDFDocument.load(templateBytes);
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const form = doc.getForm();
+      const set = (name, value, max) => {
+        const f = form.getTextField(name);
+        const s = value == null ? "" : String(value);
+        const w = f.acroField.getWidgets()[0].getRectangle().width - 4;
+        let size = max || 8;
+        while (size > 5 && font.widthOfTextAtSize(s, size) > w) size -= 0.5;
+        f.setText(s);
+        f.setFontSize(size);
+      };
+      set("Responsible Employee", header.name, 9);
+      set("Employee print name", header.name, 9);
+      set("Employee Email", header.email, 9);
+      set("Month of", header.month, 9);
+      set("Date Submitted", header.submitted, 9);
+
+      // The form has no fields in the TOTAL column, so those numbers are drawn on the page
+      const page = doc.getPage(0);
+      const center = (s, size) => (TOTAL_X0 + TOTAL_X1 - font.widthOfTextAtSize(s, size)) / 2;
+      let pageSum = 0;
+      chunk.forEach((e, i) => {
+        COLS.forEach(([prefix, key]) => set(prefix + (i + 1), e[key]));
+        if (e.total != null) {
+          pageSum += e.total;
+          const s = String(e.total);
+          page.drawText(s, { x: center(s, 8), y: ROW1_BOTTOM - i * ROW_PITCH + (ROW_H - 8) / 2 + 1, size: 8, font, color: rgb(0, 0, 0) });
+        }
+      });
+      if (chunk.length) {
+        const s = String(pageSum);
+        page.drawText(s, { x: center(s, 8), y: TOTAL_MILES_Y, size: 8, font, color: rgb(0, 0, 0) });
+      }
+      form.updateFieldAppearances(font);
+      if (multi) {
+        form.flatten();
+        const [p] = await out.copyPages(doc, [0]);
+        out.addPage(p);
+      } else single = doc;
+    }
+    return (multi ? out : single).save();
+  }
+
+  let buildAfterPick = false;
+  $("pickform").addEventListener("click", () => { buildAfterPick = false; $("formfile").click(); });
+  $("formfile").addEventListener("change", async () => {
+    const file = $("formfile").files[0];
+    $("formfile").value = "";
+    if (!file) return;
+    try {
+      const PDFLib = await loadPdfLib();
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const test = await PDFLib.PDFDocument.load(buf);
+      test.getForm().getTextField("DATERow1"); // throws if this isn't FORM-05
+      formBytes = buf;
+      try { localStorage.setItem(FKEY, toB64(buf)); msg("Blank form saved in this browser."); }
+      catch (e) { msg("Form loaded, but this browser couldn't keep it. You'll need to load it again next time.", true); }
+      $("pickform").textContent = "Change blank form";
+      if (buildAfterPick) buildPdf();
+    } catch (e) {
+      msg("That PDF doesn't look like the FORM-05 mileage form.", true);
+    }
+    buildAfterPick = false;
+  });
+
+  $("pdf").addEventListener("click", () => {
+    if (!formBytes) {
+      msg("Pick the blank FORM-05 PDF from this device. It's kept in this browser, not on the website.");
+      buildAfterPick = true;
+      $("formfile").click();
+      return;
+    }
+    buildPdf();
+  });
+
+  async function buildPdf() {
+    const month = $("pdfmonth").value;
+    if (!month) return msg("Pick the form month.", true);
+    saveSettings();
+    const list = dates().filter((d) => d.startsWith(month + "-"));
+    if (!list.length) return msg("No entries in " + month + ".", true);
+    const entries = list.map((d) => {
+      const r = rows[d];
+      return { date: short(d), initial: r.initial, phase: r.phase, project: r.project, purpose: r.purpose,
+               begin: r.begin, end: r.end, total: total(r), personal: r.personal };
+    });
+    const [y, m] = month.split("-");
+    const header = {
+      name: $("pname").value.trim(),
+      email: $("pemail").value.trim(),
+      month: new Date(+y, +m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" }),
+      submitted: long(today()),
+    };
+    const btn = $("pdf");
+    btn.disabled = true;
+    msg("Building the form…");
+    try {
+      const PDFLib = await loadPdfLib();
+      const bytes = await buildMileagePdf(PDFLib, formBytes, entries, header);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      a.download = "FORM-05_Employee_Mileage_" + month + ".pdf";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      const missing = entries.filter((e) => e.begin == null || e.end == null).length;
+      const pages = Math.ceil(entries.length / 25);
+      msg("Form built: " + entries.length + " days" + (pages > 1 ? " on " + pages + " pages" : "") + "." +
+          (missing ? " " + missing + " day" + (missing > 1 ? "s are" : " is") + " missing a reading." : ""), !!missing);
+    } catch (e) {
+      msg(e.message || String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   load();
   persist();
+  loadSettings();
+  loadStoredForm();
   fillForm(today());
 })();
 </script>
